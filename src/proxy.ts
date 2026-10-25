@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -13,7 +13,7 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -23,7 +23,16 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  let user = null
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    if (!error && data) {
+      user = data.user
+    }
+  } catch (error) {
+    // If Supabase fetch fails temporarily (DNS / network / latency), avoid crashing the server
+    console.warn('[Proxy] Failed to get user session:', error instanceof Error ? error.message : error)
+  }
 
   // Helper to preserve cookies across redirects so the browser doesn't lose refreshed auth tokens
   const redirectWithCookies = (url: URL) => {
@@ -77,6 +86,8 @@ export async function middleware(request: NextRequest) {
 
   return supabaseResponse
 }
+
+export default proxy
 
 export const config = {
   matcher: [
